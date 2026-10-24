@@ -4,6 +4,7 @@
 #include <memory>
 #include <string>
 #include "ast.h"
+#include <fstream>
 
 using namespace std;
 
@@ -14,6 +15,7 @@ using namespace std;
 // 看起来会很烦人, 于是干脆采用这种看起来 dirty 但实际很有效的手段
 extern FILE *yyin;
 extern int yyparse(unique_ptr<BaseAST> &ast);
+
 int main(int argc, const char *argv[]) {
   // 解析命令行参数. 测试脚本/评测平台要求你的编译器能接收如下参数:
   // compiler 模式 输入文件 -o 输出文件
@@ -32,8 +34,8 @@ int main(int argc, const char *argv[]) {
   auto ret = yyparse(ast);
   assert(!ret);
 
-  // dump AST
-  ast->Dump();
-  cout << endl;
+  std::ofstream ofs(output);
+  assert(ofs);
+  ast->GenerateIR(ofs);
   return 0;
 }

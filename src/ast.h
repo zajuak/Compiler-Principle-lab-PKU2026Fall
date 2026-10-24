@@ -9,6 +9,7 @@ class BaseAST {
     public:
     virtual ~BaseAST() = default;
     virtual void Dump() const = 0; 
+    virtual void GenerateIR(std::ostream &out) const = 0;
 };
 
 // CompUnit 是 BaseAST
@@ -22,6 +23,11 @@ class CompUnitAST : public BaseAST {
         func_def->Dump();
         std::cout << " }";
     }
+
+    void GenerateIR(std::ostream &out) const override{
+        func_def->GenerateIR(out);
+    }
+    
 };
 
 // FuncDef 也是 BaseAST
@@ -38,6 +44,17 @@ class FuncDefAST : public BaseAST {
         block->Dump();
         std::cout << " }";
     }
+
+    void GenerateIR(std::ostream &out) const override{
+        out << "fun @" << ident << "(): ";
+        func_type->GenerateIR(out);
+        out << " {\n";
+
+        block->GenerateIR(out);
+
+        out << "}\n";        
+    }
+    
 };
 
 // FuncType
@@ -46,6 +63,11 @@ class FuncTypeAST : public BaseAST {
     void Dump() const override {
         std::cout << "FuncTypeAST {int} ";
     }
+
+    void GenerateIR(std::ostream &out) const override{
+        out << "i32";
+    }
+    
 };
 
 // Block
@@ -58,6 +80,12 @@ class BlockAST  : public BaseAST{
         stmt -> Dump();
         std::cout<< "}";
     }
+
+    void GenerateIR(std::ostream &out) const override{
+        out << "%entry:\n";
+        stmt->GenerateIR(out);
+    }
+    
 };
 
 class StmtAST : public BaseAST{
@@ -67,4 +95,8 @@ class StmtAST : public BaseAST{
         std::cout << "StmtAST {"<< number <<"}";
     }
 
+    void GenerateIR(std::ostream &out) const override{
+        out << "  ret " << number << "\n";       
+    }
+    
 };
