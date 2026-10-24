@@ -5,6 +5,9 @@
 #include <string>
 #include "ast.h"
 #include <fstream>
+#include "koopa.h"
+#include "riscv.h"
+#include <sstream>
 
 using namespace std;
 
@@ -17,25 +20,60 @@ extern FILE *yyin;
 extern int yyparse(unique_ptr<BaseAST> &ast);
 
 int main(int argc, const char *argv[]) {
-  // 解析命令行参数. 测试脚本/评测平台要求你的编译器能接收如下参数:
-  // compiler 模式 输入文件 -o 输出文件
-  assert(argc == 5);
-  auto mode = argv[1];
-  auto input = argv[2];
-  auto output = argv[4];
+    // 解析命令行参数. 测试脚本/评测平台要求你的编译器能接收如下参数:
+    // compiler 模式 输入文件 -o 输出文件
+    assert(argc == 5);
+    std::string mode = argv[1];
+    auto input = argv[2];
+    auto output = argv[4];
 
-  // 打开输入文件, 并且指定 lexer 在解析的时候读取这个文件
-  yyin = fopen(input, "r");
-  assert(yyin);
+    // 打开输入文件, 并且指定 lexer 在解析的时候读取这个文件
+    yyin = fopen(input, "r");
+    assert(yyin);
 
-  // 调用 parser 函数, parser 函数会进一步调用 lexer 解析输入文件的
-  // parse input file
-  unique_ptr<BaseAST> ast;
-  auto ret = yyparse(ast);
-  assert(!ret);
+    // 调用 parser 函数, parser 函数会进一步调用 lexer 解析输入文件的
+    // parse input file
+    unique_ptr<BaseAST> ast;
+    auto ret = yyparse(ast);
+    assert(!ret);
 
-  std::ofstream ofs(output);
-  assert(ofs);
-  ast->GenerateIR(ofs);
+    // 先将 IR 写入字符串流
+    std::ostringstream ir_stream;
+    ast->GenerateIR(ir_stream);
+
+    // 取出完整的 IR 文本
+    std::string ir = ir_stream.str();
+    std::ofstream ofs(output);
+    assert(ofs);
+
+    // Koopa 模式直接输出 IR，不进入目标代码生成。
+    if (mode == "-koopa") {
+        ofs << ir;
+        return 0;
+    }
+
+    if (mode != "-riscv") {
+        std::cerr << "Unknown mode: " << mode << '\n';
+        return 1;
+    }
+
+    // RISC-V 模式解析 IR，交给后端处理。
+    koopa_program_t program;
+    koopa_error_code_t koopa_ret = koopa_parse_from_string(ir.c_str(), &program);
+    assert(koopa_ret == KOOPA_EC_SUCCESS);  // 确保解析时没有出错
+    // 创建一个 raw program builder, 用来构建 raw program
+    koopa_raw_program_builder_t builder = koopa_new_raw_program_builder();
+    // 将 Koopa IR 程序转换为 raw program
+    koopa_raw_program_t raw = koopa_build_raw_program(builder, program);
+    // 释放 Koopa IR 程序占用的内存
+    koopa_delete_program(program);
+
+    // 通过独立模块处理 raw program，向输出文件生成汇编。
+    GenerateRiscv(raw, ofs);
+    // 处理完成, 释放 raw program builder 占用的内存
+    // 注意, raw program 中所有的指针指向的内存均为 raw program builder 的内存
+    // 所以不要在 raw program 处理完毕之前释放 builder
+    koopa_delete_raw_program_builder(builder);
+
   return 0;
 }
