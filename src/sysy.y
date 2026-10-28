@@ -43,8 +43,8 @@ using namespace std;
 %token <int_val> INT_CONST
 
 // 非终结符的类型定义
-%type <ast_val> FuncDef FuncType Block Stmt 
-%type <int_val> Number
+%type <ast_val> FuncDef FuncType Block Stmt Exp PrimaryExp Number UnaryExp
+%type <int_val> UnaryOp
 
 %%
 
@@ -97,19 +97,59 @@ Block
   ;
 
 Stmt
-  : RETURN Number ';' {
+  : RETURN Exp ';' {
     auto ast = new StmtAST();
-    ast -> number = $2 ;
+    ast -> exp = unique_ptr<BaseAST>($2);
     $$ = ast;
   }
   ;
 
-Number
-  : INT_CONST {
+Exp
+  : UnaryExp {
     $$ = $1;
   }
   ;
 
+PrimaryExp
+  : '(' Exp ')'{
+    $$ = $2;
+  }
+  | Number {
+    $$ = $1;
+  }
+  ;
+
+Number 
+  : INT_CONST {
+    auto ast = new NumAST();
+    ast -> num = $1;
+    $$ = ast;
+  }
+  ;
+
+UnaryOp 
+  : '+'{
+    $$ = '+';
+  }
+  | '-'{ 
+    $$ = '-';
+  }
+  | '!'{
+    $$ = '!';
+  }
+  ;
+
+UnaryExp
+  : PrimaryExp{
+    $$ = $1;
+  }
+  | UnaryOp UnaryExp{
+    auto ast = new ExpAST();
+    ast -> op = static_cast<char>($1);
+    ast -> operand = unique_ptr <BaseAST>($2);
+    $$ = ast;
+  }
+  ;
 %%
 
 // 定义错误处理函数, 其中第二个参数是错误信息
