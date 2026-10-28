@@ -177,3 +177,50 @@ class NumAST : public BaseAST{
         return std::to_string(num);
     }
 };
+
+class BinaryAST : public BaseAST{
+    public:
+    using BaseAST::GenerateIR;
+
+    char op;
+    std::unique_ptr<BaseAST> lhs;
+    std::unique_ptr<BaseAST> rhs;
+
+    void Dump()const override {
+        std::cout << "BinaryExpAST { " << op << ", ";
+        lhs->Dump();
+        std::cout << ", ";
+        rhs->Dump();
+        std::cout << " }";
+    }
+
+    std::string GenerateIR(std::ostream &out, IRContext &context) const override{
+        const auto left = lhs ->GenerateIR(out,context);
+        const auto right = rhs ->GenerateIR(out,context);
+        const char *instruction;
+        switch(op){
+            case '+':
+                instruction = "add";
+                break;
+            case '-':
+                instruction = "sub";
+                break;
+            case '*':
+                instruction = "mul";
+                break;
+            case '/':
+                instruction = "div";
+                break;
+            case '%':
+                instruction = "mod";
+                break;
+            default:
+                throw std::logic_error("Unsupported arithmetic operator");
+        }
+
+        const auto result = context.NewTemp();
+        out << "  " << result << " = " << instruction<< " " << left << ", " << right << '\n';
+
+        return result;
+    }
+};
