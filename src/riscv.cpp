@@ -18,9 +18,9 @@ struct RiscvContext {
 };
 
 std::string NewReg(RiscvContext &context) {
-    static const std::array<const char *, 12> registers = {
+    static const std::array<const char *, 13> registers = {
         "t2", "t3", "t4", "t5", "t6",
-        "a1", "a2", "a3", "a4", "a5", "a6", "a7"
+        "a1", "a2", "a3", "a4", "a5", "a6", "a7", "a0"
     };
 
     if (context.next_reg >= registers.size()) {
