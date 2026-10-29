@@ -6,6 +6,7 @@
 #include <unordered_map>
 #include <array>
 #include <stdexcept>
+#include <vector>
 
 namespace {
 
@@ -18,8 +19,8 @@ struct RiscvContext {
 };
 
 std::string NewReg(RiscvContext &context) {
-    static const std::array<const char *, 13> registers = {
-        "t2", "t3", "t4", "t5", "t6",
+    static const std::array<const char *, 15> registers = {
+        "t0", "t1", "t2", "t3", "t4", "t5", "t6",
         "a1", "a2", "a3", "a4", "a5", "a6", "a7", "a0"
     };
 
@@ -31,20 +32,19 @@ std::string NewReg(RiscvContext &context) {
 }
 
 
-std::string GetOperandReg(koopa_raw_value_t value, const std::string &scratch, std::ostream &out, RiscvContext &context) {
+std::string GetOperandReg(koopa_raw_value_t value, std::ostream &out, RiscvContext &context) {
     assert(value != nullptr);
 
     switch (value->kind.tag) {
         case KOOPA_RVT_INTEGER: {
             const auto number = value->kind.data.integer.value;
 
-            // 常量零可以直接使用 zero 寄存器。
             if (number == 0) {
                 return "zero";
             }
-
-            out << "  li " << scratch << ", " << number << '\n';
-            return scratch;
+            const auto reg = NewReg(context);
+            out << "  li " << reg << ", " << number << '\n';
+            return reg;
         }
 
         case KOOPA_RVT_BINARY: {
@@ -144,8 +144,13 @@ void Visit(const koopa_raw_value_t &value, std::ostream &out, RiscvContext &cont
 // 访问返回指令，继续访问其返回值（若存在）。
 void Visit(const koopa_raw_return_t &ret, std::ostream &out, RiscvContext &context) {
     if (ret.value != nullptr) {
-        const auto reg = GetOperandReg (ret.value, "t0", out, context);
-        out << "  mv a0, " << reg << '\n';
+        if (ret.value->kind.tag == KOOPA_RVT_INTEGER) {
+            out << "  li a0, " << ret.value->kind.data.integer.value << '\n';
+        } 
+        else {
+            const auto reg = GetOperandReg(ret.value, out, context);
+            out << "  mv a0, " << reg << '\n';
+        }
     }
     out << "  ret\n";
 }
@@ -201,10 +206,14 @@ std::string Visit(const koopa_raw_binary_t &binary, std::ostream &out, RiscvCont
                 "Unsupported binary operation");
     }    
 
-    const auto lhs_reg = GetOperandReg(binary.lhs, "t0", out, context);
-    const auto rhs_reg = GetOperandReg(binary.rhs, "t1", out, context);
-    const auto result_reg = NewReg(context);
+    const auto lhs_reg = GetOperandReg(binary.lhs, out, context);
+    const auto rhs_reg = GetOperandReg(binary.rhs, out, context);
+    std::string result_reg;
 
+    if (lhs_reg != "zero")      result_reg = lhs_reg;
+    else if (rhs_reg != "zero") result_reg = rhs_reg;
+    else                        result_reg = NewReg(context);
+    
     out << "  " << instruction << " " << result_reg << ", " << lhs_reg << ", " << rhs_reg << '\n';
     if (binary.op == KOOPA_RBO_EQ || binary.op == KOOPA_RBO_GE || binary.op == KOOPA_RBO_LE) {
         out << "  seqz " << result_reg << ", " << result_reg << '\n';
