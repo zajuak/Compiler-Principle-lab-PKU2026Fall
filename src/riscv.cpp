@@ -4,7 +4,6 @@
 #include <cstddef>
 #include <string>
 #include <unordered_map>
-#include <array>
 #include <stdexcept>
 #include <vector>
 
@@ -13,22 +12,19 @@ namespace {
 struct RiscvContext {
     // IR Value 的结果保存在哪个寄存器。
     std::unordered_map<koopa_raw_value_t, std::string> value_regs;
-
-    // 下一个待分配寄存器在可用列表中的位置。
-    std::size_t next_reg = 0;
+    std::vector <std::string> free_regs = {
+        "a0","a7", "a6", "a5", "a4", "a3", "a2", "a1",
+        "t6", "t5", "t4", "t3", "t2", "t1", "t0" 
+    };
 };
 
 std::string NewReg(RiscvContext &context) {
-    static const std::array<const char *, 15> registers = {
-        "t0", "t1", "t2", "t3", "t4", "t5", "t6",
-        "a1", "a2", "a3", "a4", "a5", "a6", "a7", "a0"
-    };
-
-    if (context.next_reg >= registers.size()) {
+    if (context.free_regs.empty()) {
         throw std::runtime_error("Register pool exhausted");
     }
-
-    return registers[context.next_reg++];
+    auto reg = context.free_regs.back();
+    context.free_regs.pop_back();
+    return reg;
 }
 
 
@@ -51,8 +47,7 @@ std::string GetOperandReg(koopa_raw_value_t value, std::ostream &out, RiscvConte
             const auto it = context.value_regs.find(value);
 
             if (it == context.value_regs.end()) {
-                throw std::logic_error(
-                    "Operand result has not been generated");
+                throw std::logic_error("Operand result has not been generated");
             }
 
             return it->second;
@@ -107,8 +102,7 @@ void Visit(const koopa_raw_function_t &func, std::ostream &out, RiscvContext &co
     // 输出函数入口相关的汇编。
     if (func -> bbs.len == 0) return;
 
-    context.value_regs.clear();
-    context.next_reg = 0;
+    context = RiscvContext{};
 
     const char *name = func -> name +1;
     
@@ -220,6 +214,15 @@ std::string Visit(const koopa_raw_binary_t &binary, std::ostream &out, RiscvCont
     } 
     else if (binary.op == KOOPA_RBO_NOT_EQ) {
         out << "  snez " << result_reg << ", " << result_reg << '\n';
+    }
+
+    //回收
+    if (lhs_reg != "zero" && lhs_reg != result_reg) {
+        context.free_regs.push_back(lhs_reg);
+    }
+
+    if (rhs_reg != "zero" && rhs_reg != result_reg && rhs_reg != lhs_reg) {
+        context.free_regs.push_back(rhs_reg);
     }
 
     return result_reg;
