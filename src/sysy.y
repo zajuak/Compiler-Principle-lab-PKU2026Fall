@@ -41,10 +41,12 @@ using namespace std;
 %token INT RETURN
 %token <str_val> IDENT
 %token <int_val> INT_CONST
+%token LE GE EQ NE LAND LOR
 
 // 非终结符的类型定义
-%type <ast_val> FuncDef FuncType Block Stmt Exp PrimaryExp Number UnaryExp MulExp AddExp
-%type <int_val> UnaryOp MulOp AddOp
+%type <ast_val> FuncDef FuncType Block Stmt Exp PrimaryExp Number UnaryExp MulExp AddExp LOrExp RelExp EqExp LAndExp
+%type <int_val> UnaryOp MulOp AddOp 
+%type <str_val> EqOp RelOp
 
 %%
 
@@ -81,7 +83,6 @@ FuncDef
   }
   ;
 
-// 同上, 不再解释
 FuncType
   : INT {
     $$ = new FuncTypeAST();
@@ -105,7 +106,7 @@ Stmt
   ;
 
 Exp
-  : AddExp {
+  : LOrExp {
     $$ = $1;
   }
   ;
@@ -186,6 +187,68 @@ AddExp
 AddOp
   : '+' { $$ = '+'; }
   | '-' { $$ = '-'; }
+  ;
+
+RelExp
+  : AddExp{  
+    $$ = $1;
+  }
+  | RelExp RelOp AddExp { 
+    auto ast = new BinaryAST();
+    ast -> op = *unique_ptr <string> ($2);
+    ast->lhs = unique_ptr<BaseAST>($1);
+    ast->rhs = unique_ptr<BaseAST>($3);
+    $$ = ast;
+  }
+  ;
+
+RelOp 
+  : '<' { $$ = new string("<"); }
+  | '>' { $$ = new string(">"); }
+  | LE  { $$ = new string("<="); }
+  | GE  { $$ = new string(">="); }
+  ;
+
+EqExp 
+  : RelExp {$$ = $1;}
+  | EqExp EqOp RelExp{
+    auto ast = new BinaryAST();
+    ast->op = *unique_ptr<string>($2);
+    ast->lhs = unique_ptr<BaseAST>($1);
+    ast->rhs = unique_ptr<BaseAST>($3);
+    $$ = ast;
+  }
+  ;
+
+EqOp 
+  :  EQ { $$ = new string("=="); }
+  | NE { $$ = new string("!="); }
+  ;
+
+LAndExp
+  : EqExp {
+    $$ = $1;
+  }
+  | LAndExp LAND EqExp {
+    auto ast = new BinaryAST();
+    ast->op = "&&";
+    ast->lhs = unique_ptr<BaseAST>($1);
+    ast->rhs = unique_ptr<BaseAST>($3);
+    $$ = ast;
+  }
+  ;
+
+LOrExp
+  : LAndExp {
+    $$ = $1;
+  }
+  | LOrExp LOR LAndExp {
+    auto ast = new BinaryAST();
+    ast->op = "||";
+    ast->lhs = unique_ptr<BaseAST>($1);
+    ast->rhs = unique_ptr<BaseAST>($3);
+    $$ = ast;
+  }
   ;
 %%
 

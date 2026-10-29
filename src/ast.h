@@ -182,7 +182,7 @@ class BinaryAST : public BaseAST{
     public:
     using BaseAST::GenerateIR;
 
-    char op;
+    std::string op;
     std::unique_ptr<BaseAST> lhs;
     std::unique_ptr<BaseAST> rhs;
 
@@ -197,25 +197,44 @@ class BinaryAST : public BaseAST{
     std::string GenerateIR(std::ostream &out, IRContext &context) const override{
         const auto left = lhs ->GenerateIR(out,context);
         const auto right = rhs ->GenerateIR(out,context);
+
+        if (op == "&&" || op == "||") {
+            const auto left_bool = context.NewTemp();
+            out << "  " << left_bool << " = ne " << left << ", 0\n";
+            const auto right_bool = context.NewTemp();
+            out << "  " << right_bool << " = ne " << right << ", 0\n";
+
+            const auto result = context.NewTemp();
+            const char *instruction = op == "&&" ? "and" : "or";
+            out << "  " << result << " = " << instruction << " " << left_bool << ", " << right_bool << '\n';
+            return result;
+        }
+
         const char *instruction;
-        switch(op){
-            case '+':
-                instruction = "add";
-                break;
-            case '-':
-                instruction = "sub";
-                break;
-            case '*':
-                instruction = "mul";
-                break;
-            case '/':
-                instruction = "div";
-                break;
-            case '%':
-                instruction = "mod";
-                break;
-            default:
-                throw std::logic_error("Unsupported arithmetic operator");
+        if (op == "+") {
+            instruction = "add";
+        } else if (op == "-") {
+            instruction = "sub";
+        } else if (op == "*") {
+            instruction = "mul";
+        } else if (op == "/") {
+            instruction = "div";
+        } else if (op == "%") {
+            instruction = "mod";
+        } else if (op == "<") {
+            instruction = "lt";
+        } else if (op == ">") {
+            instruction = "gt";
+        } else if (op == "<=") {
+            instruction = "le";
+        } else if (op == ">=") {
+            instruction = "ge";
+        } else if (op == "==") {
+            instruction = "eq";
+        } else if (op == "!=") {
+            instruction = "ne";
+        } else {
+            throw std::logic_error("Unsupported binary operator: " + op);
         }
 
         const auto result = context.NewTemp();
