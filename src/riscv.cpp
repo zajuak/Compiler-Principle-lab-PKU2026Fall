@@ -1,49 +1,27 @@
 #include "riscv.h"
+#include "stack_frame.h"
 
 #include <cstddef>
 #include <string>
-#include <unordered_map>
-#include <vector>
+#include <stdexcept>
 
 namespace {
 
 struct RiscvContext {
-    // IR Value 的结果保存在哪个寄存器。
-    std::unordered_map<koopa_raw_value_t, std::string> value_regs;
-    std::vector <std::string> free_regs = {
-        "a0","a7", "a6", "a5", "a4", "a3", "a2", "a1",
-        "t6", "t5", "t4", "t3", "t2", "t1", "t0" 
-    };
+    StackFrame stack;
 };
 
-std::string NewReg(RiscvContext &context) {
-    auto reg = context.free_regs.back();
-    context.free_regs.pop_back();
-    return reg;
-}
-
-
-std::string GetOperandReg(koopa_raw_value_t value, std::ostream &out, RiscvContext &context) {
+//读取操作数
+void LoadValue(koopa_raw_value_t value, const std::string &reg, std::ostream &out, RiscvContext &context) {
     switch (value->kind.tag) {
-        case KOOPA_RVT_INTEGER: {
-            const auto number = value->kind.data.integer.value;
+        case KOOPA_RVT_INTEGER:
+            out << "  li " << reg << ", " << value->kind.data.integer.value << '\n';
+            break;
 
-            if (number == 0) {
-                return "zero";
-            }
-            const auto reg = NewReg(context);
-            out << "  li " << reg << ", " << number << '\n';
-            return reg;
-        }
-
-        case KOOPA_RVT_BINARY: {
-            const auto it = context.value_regs.find(value);
-
-            return it->second;
-        }
-
-        default:
-            return "";
+        case KOOPA_RVT_BINARY:
+        case KOOPA_RVT_LOAD:
+            EmitStackLoad(reg, context.stack.GetOffset(value), out);
+            break;
     }
 }
 
@@ -55,7 +33,9 @@ void Visit(const koopa_raw_basic_block_t &bb, std::ostream &out, RiscvContext &c
 void Visit(const koopa_raw_value_t &value, std::ostream &out, RiscvContext &context);
 void Visit(const koopa_raw_return_t &ret, std::ostream &out, RiscvContext &context);
 void Visit(const koopa_raw_integer_t &integer, std::ostream &out, RiscvContext &context);
-std::string Visit(const koopa_raw_binary_t &binary, std::ostream &out, RiscvContext &context);
+void Visit(const koopa_raw_binary_t &binary, std::ostream &out, RiscvContext &context);
+void Visit(const koopa_raw_load_t &load, std::ostream &out, RiscvContext &context);
+void Visit(const koopa_raw_store_t &store, std::ostream &out, RiscvContext &context);
 
 // 访问 raw program。
 void Visit(const koopa_raw_program_t &program, std::ostream &out, RiscvContext &context) {
@@ -92,12 +72,13 @@ void Visit(const koopa_raw_function_t &func, std::ostream &out, RiscvContext &co
     if (func -> bbs.len == 0) return;
 
     context = RiscvContext{};
-
+    context.stack.Analyze(func);
     const char *name = func -> name +1;
     
     out << "  .text \n";
     out << "  .globl " << name <<"\n";
     out << name << ":\n"; 
+    EmitStackAdjust(-context.stack.GetSize(), out);
     Visit(func->bbs, out, context);
 }
 
@@ -110,31 +91,34 @@ void Visit(const koopa_raw_basic_block_t &bb, std::ostream &out, RiscvContext &c
 void Visit(const koopa_raw_value_t &value, std::ostream &out, RiscvContext &context) {
     const auto &kind = value->kind;
     switch (kind.tag) {
+        case KOOPA_RVT_ALLOC:
+            // Analyze 已经为对象安排了空间。
+            break;
+        case KOOPA_RVT_LOAD:
+            Visit(kind.data.load, out, context);
+            EmitStackStore("t0", context.stack.GetOffset(value), out);
+            break;
+        case KOOPA_RVT_STORE:
+            Visit(kind.data.store, out, context);
+            break;
         case KOOPA_RVT_RETURN:
             Visit(kind.data.ret, out, context);
             break;
-        case KOOPA_RVT_INTEGER:
-            Visit(kind.data.integer, out, context);
-            break;
         case KOOPA_RVT_BINARY:
-            context.value_regs[value] = Visit(kind.data.binary, out, context);
+            Visit(kind.data.binary, out, context);
+            EmitStackStore("t0", context.stack.GetOffset(value), out);
             break;
         default:
             break;
     }
 }
 
-// 访问返回指令，继续访问其返回值（若存在）。
+// 访问返回指令
 void Visit(const koopa_raw_return_t &ret, std::ostream &out, RiscvContext &context) {
     if (ret.value != nullptr) {
-        if (ret.value->kind.tag == KOOPA_RVT_INTEGER) {
-            out << "  li a0, " << ret.value->kind.data.integer.value << '\n';
-        } 
-        else {
-            const auto reg = GetOperandReg(ret.value, out, context);
-            out << "  mv a0, " << reg << '\n';
-        }
+        LoadValue(ret.value, "a0", out, context);
     }
+    EmitStackAdjust(context.stack.GetSize(), out);
     out << "  ret\n";
 }
 
@@ -144,7 +128,7 @@ void Visit(const koopa_raw_integer_t &integer, std::ostream &out, RiscvContext &
 }
 
 // 访问二元运算结果
-std::string Visit(const koopa_raw_binary_t &binary, std::ostream &out, RiscvContext &context){
+void Visit(const koopa_raw_binary_t &binary, std::ostream &out, RiscvContext &context){
     const char *instruction;
 
     switch (binary.op) {
@@ -184,36 +168,33 @@ std::string Visit(const koopa_raw_binary_t &binary, std::ostream &out, RiscvCont
         case KOOPA_RBO_LE:
             instruction = "sgt";
             break;            
-        default:
-            return "";
     }    
 
-    const auto lhs_reg = GetOperandReg(binary.lhs, out, context);
-    const auto rhs_reg = GetOperandReg(binary.rhs, out, context);
-    std::string result_reg;
+    LoadValue(binary.lhs, "t0", out, context);
+    LoadValue(binary.rhs, "t1", out, context);
 
-    if (lhs_reg != "zero")      result_reg = lhs_reg;
-    else if (rhs_reg != "zero") result_reg = rhs_reg;
-    else                        result_reg = NewReg(context);
-    
-    out << "  " << instruction << " " << result_reg << ", " << lhs_reg << ", " << rhs_reg << '\n';
-    if (binary.op == KOOPA_RBO_EQ || binary.op == KOOPA_RBO_GE || binary.op == KOOPA_RBO_LE) {
-        out << "  seqz " << result_reg << ", " << result_reg << '\n';
-    } 
-    else if (binary.op == KOOPA_RBO_NOT_EQ) {
-        out << "  snez " << result_reg << ", " << result_reg << '\n';
+    out << "  " << instruction << " t0, t0, t1\n";
+
+    if (binary.op == KOOPA_RBO_EQ ||
+        binary.op == KOOPA_RBO_GE ||
+        binary.op == KOOPA_RBO_LE) {
+        out << "  seqz t0, t0\n";
+    } else if (binary.op == KOOPA_RBO_NOT_EQ) {
+        out << "  snez t0, t0\n";
     }
+}
 
-    //回收
-    if (lhs_reg != "zero" && lhs_reg != result_reg) {
-        context.free_regs.push_back(lhs_reg);
-    }
+void Visit(const koopa_raw_load_t &load, std::ostream &out, RiscvContext &context) {
+    // 读取变量当前的值，暂存在 t0。
+    EmitStackLoad(
+        "t0", context.stack.GetOffset(load.src), out);
+}
 
-    if (rhs_reg != "zero" && rhs_reg != result_reg && rhs_reg != lhs_reg) {
-        context.free_regs.push_back(rhs_reg);
-    }
-
-    return result_reg;
+void Visit(const koopa_raw_store_t &store, std::ostream &out, RiscvContext &context) {
+    // 读取要写入的值。
+    LoadValue(store.value, "t0", out, context);
+    // 写入目标变量的位置。
+    EmitStackStore("t0", context.stack.GetOffset(store.dest), out);
 }
 
 }  // namespace
