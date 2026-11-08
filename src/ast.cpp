@@ -20,7 +20,7 @@ std::string CompUnitAST::GenerateIR(std::ostream &out, IRContext &context) const
 }
 
 std::string FuncDefAST::GenerateIR(std::ostream &out, IRContext &context) const {
-    context.next_temp = 0;
+    context = IRContext{};
     const auto type = func_type->GenerateIR(out, context);
     out << "fun @" << ident << "(): " << type << " {\n";
 
@@ -37,13 +37,16 @@ std::string FuncTypeAST::GenerateIR(std::ostream &, IRContext &) const {
 std::string BlockAST::GenerateIR(std::ostream &out, IRContext &context) const {
     out << "%entry:\n";
     for (const auto &item : items){
-        item->GenerateIR(out, context);}
+        if (context.terminated) break;
+        item->GenerateIR(out, context);
+    }
     return "";
 }
 
 std::string StmtAST::GenerateIR(std::ostream &out, IRContext &context) const {
     const auto value = exp->GenerateIR(out, context);
     out << "  ret " << value << "\n";
+    context.terminated = true;
     return "";
 }
 

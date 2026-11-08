@@ -23,6 +23,7 @@ struct IRContext {
     std::size_t next_temp = 0;
     std::unordered_map<std::string, Symbol> symbols;
     std::string NewTemp();
+    bool terminated = false;
 };
 
 // 所有 AST 的基类
