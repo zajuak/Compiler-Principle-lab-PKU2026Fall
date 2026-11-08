@@ -1,12 +1,12 @@
 %code requires {
   #include <memory>
   #include <string>
+  #include <vector>
   #include "ast.h"
 }
 
 %{
 
-#include <iostream>
 #include <memory>
 #include <string>
 #include "ast.h"
@@ -34,6 +34,7 @@ using namespace std;
   std::string *str_val;
   int int_val;
   BaseAST *ast_val;
+  std::vector<std::unique_ptr<BaseAST>> *ast_list;
 }
 
 // lexer 返回的所有 token 种类的声明
@@ -42,9 +43,14 @@ using namespace std;
 %token <str_val> IDENT
 %token <int_val> INT_CONST
 %token LE GE EQ NE LAND LOR
+%token CONST
 
 // 非终结符的类型定义
-%type <ast_val> FuncDef FuncType Block Stmt Exp PrimaryExp Number UnaryExp MulExp AddExp LOrExp RelExp EqExp LAndExp
+%type <ast_val> FuncDef FuncType Block Stmt 
+%type <ast_val> Exp PrimaryExp Number UnaryExp MulExp AddExp LOrExp RelExp EqExp LAndExp
+%type <ast_val> Decl ConstDecl ConstDef ConstInitVal ConstExp
+%type <ast_val> BlockItem LVal
+%type <ast_list> BlockItems ConstDefList
 %type <int_val> UnaryOp MulOp AddOp 
 %type <str_val> EqOp RelOp
 
@@ -63,16 +69,6 @@ CompUnit
   }
   ;
 
-// FuncDef ::= FuncType IDENT '(' ')' Block;
-// 我们这里可以直接写 '(' 和 ')', 因为之前在 lexer 里已经处理了单个字符的情况
-// 解析完成后, 把这些符号的结果收集起来, 然后拼成一个新的字符串, 作为结果返回
-// $$ 表示非终结符的返回值, 我们可以通过给这个符号赋值的方法来返回结果
-// 你可能会问, FuncType, IDENT 之类的结果已经是字符串指针了
-// 为什么还要用 unique_ptr 接住它们, 然后再解引用, 把它们拼成另一个字符串指针呢
-// 因为所有的字符串指针都是我们 new 出来的, new 出来的内存一定要 delete
-// 否则会发生内存泄漏, 而 unique_ptr 这种智能指针可以自动帮我们 delete
-// 虽然此处你看不出用 unique_ptr 和手动 delete 的区别, 但当我们定义了 AST 之后
-// 这种写法会省下很多内存管理的负担
 FuncDef
   : FuncType IDENT '(' ')' Block {
     auto ast = new FuncDefAST();
@@ -90,10 +86,30 @@ FuncType
   ;
 
 Block
-  : '{' Stmt '}' {
-    auto ast = new BlockAST();
-    ast -> stmt = unique_ptr<BaseAST>($2);
-    $$ = ast;
+  : '{' BlockItems '}' {
+    auto items = unique_ptr<vector<unique_ptr<BaseAST>>>($2);
+    auto node = new BlockAST();
+    node->items = std::move(*items);
+    $$ = node;
+  }
+  ;
+
+BlockItems
+  : %empty {
+    $$ = new vector<unique_ptr<BaseAST>>();
+  }
+  | BlockItems BlockItem {
+    $1->emplace_back($2);
+    $$ = $1;
+  }
+  ;
+
+BlockItem
+  : Decl {
+    $$ = $1;
+  }
+  | Stmt {
+    $$ = $1;
   }
   ;
 
@@ -105,6 +121,64 @@ Stmt
   }
   ;
 
+//常量和变量
+Decl
+  : ConstDecl {
+    $$ = $1;
+  }
+  : VarDecl{
+    
+  }
+  ;
+
+ConstDecl
+  : CONST BType ConstDefList ';' {
+    auto defs = unique_ptr<vector<unique_ptr<BaseAST>>>($3);
+    auto node = new ConstDeclAST();
+    node->defs = std::move(*defs);
+    $$ = node;
+  }
+  ;
+BType
+  : INT {
+  }
+  ;
+
+ConstDefList
+  : ConstDef {
+    auto defs = new vector<unique_ptr<BaseAST>>();
+    defs->emplace_back($1);
+    $$ = defs;
+  }
+  | ConstDefList ',' ConstDef {
+    $1->emplace_back($3);
+    $$ = $1;
+  }
+  ;
+
+ConstDef
+  : IDENT '=' ConstInitVal {
+    auto ident = unique_ptr<string>($1);
+
+    auto node = new ConstDefAST();
+    node->ident = *ident;
+    node->init_val = unique_ptr<BaseAST>($3);
+    $$ = node;
+  }
+  ;
+
+ConstInitVal
+  : ConstExp {
+    $$ = $1;
+  }
+  ;
+
+ConstExp
+  : Exp {
+    $$ = $1;
+  }
+  ;
+//表达式
 Exp
   : LOrExp {
     $$ = $1;
@@ -114,9 +188,21 @@ Exp
 PrimaryExp
   : '(' Exp ')'{
     $$ = $2;
+  }  
+  | LVal {
+    $$ = $1;
   }
   | Number {
     $$ = $1;
+  }
+  ;
+
+LVal
+  : IDENT {
+    auto ident = unique_ptr<string>($1);
+    auto node = new LValAST();
+    node->ident = *ident;
+    $$ = node;
   }
   ;
 
@@ -252,8 +338,5 @@ LOrExp
   ;
 %%
 
-// 定义错误处理函数, 其中第二个参数是错误信息
-// parser 如果发生错误 (例如输入的程序出现了语法错误), 就会调用这个函数
-void yyerror(unique_ptr<BaseAST> &ast, const char *s) {
-  cerr << "error: " << s << endl;
-}
+// Bison 所需的错误回调。
+void yyerror(unique_ptr<BaseAST> &, const char *) {}

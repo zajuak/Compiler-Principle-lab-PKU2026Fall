@@ -1,7 +1,6 @@
 #include "ast.h"
 
-#include <iostream>
-#include <stdexcept>
+#include <cstdint>
 
 std::string IRContext::NewTemp() {
     return "%" + std::to_string(next_temp++);
@@ -11,23 +10,12 @@ void BaseAST::GenerateIR(std::ostream &out) const {
     IRContext context;
     GenerateIR(out, context);
 }
-
-void CompUnitAST::Dump() const {
-    std::cout << "CompUnitAST { ";
-    func_def->Dump();
-    std::cout << " }";
+int BaseAST::Calculate(const IRContext &) const {
+    return 0;
 }
 
 std::string CompUnitAST::GenerateIR(std::ostream &out, IRContext &context) const {
     return func_def->GenerateIR(out, context);
-}
-
-void FuncDefAST::Dump() const {
-    std::cout << "FuncDefAST { ";
-    func_type->Dump();
-    std::cout << ", " << ident << ", ";
-    block->Dump();
-    std::cout << " }";
 }
 
 std::string FuncDefAST::GenerateIR(std::ostream &out, IRContext &context) const {
@@ -41,30 +29,15 @@ std::string FuncDefAST::GenerateIR(std::ostream &out, IRContext &context) const 
     return "";
 }
 
-void FuncTypeAST::Dump() const {
-    std::cout << "FuncTypeAST {int} ";
-}
-
 std::string FuncTypeAST::GenerateIR(std::ostream &, IRContext &) const {
     return "i32";
 }
 
-void BlockAST::Dump() const {
-    std::cout << "BlockAST { ";
-    stmt -> Dump();
-    std::cout<< "}";
-}
-
 std::string BlockAST::GenerateIR(std::ostream &out, IRContext &context) const {
     out << "%entry:\n";
-    stmt->GenerateIR(out, context);
+    for (const auto &item : items){
+        item->GenerateIR(out, context);}
     return "";
-}
-
-void StmtAST::Dump() const {
-    std::cout << "StmtAST { ";
-    exp -> Dump();
-    std::cout <<"}";
 }
 
 std::string StmtAST::GenerateIR(std::ostream &out, IRContext &context) const {
@@ -73,10 +46,34 @@ std::string StmtAST::GenerateIR(std::ostream &out, IRContext &context) const {
     return "";
 }
 
-void ExpAST::Dump() const {
-    std::cout << "ExpAST { " << op << ", ";
-    operand -> Dump();
-    std::cout << " }";
+std::string ConstDeclAST::GenerateIR(std::ostream &out, IRContext &context) const {
+
+    for (const auto &def : defs) {
+        def->GenerateIR(out, context);
+    }
+    return "";
+}
+
+std::string ConstDefAST::GenerateIR(std::ostream &, IRContext &context) const {
+    const auto value = init_val->Calculate(context);
+    context.constants.emplace(ident, value);
+    return "";
+}
+
+std::string LValAST::GenerateIR(std::ostream &, IRContext &context) const {
+    return std::to_string(Calculate(context));
+}
+int LValAST::Calculate(const IRContext &context) const {
+    const auto it = context.constants.find(ident);
+    return it->second;
+}
+
+std::string NumAST::GenerateIR(std::ostream &, IRContext &) const {
+    return std::to_string(num);
+}
+
+int NumAST::Calculate(const IRContext &) const {
+    return num;
 }
 
 std::string ExpAST::GenerateIR(std::ostream &out, IRContext &context) const {
@@ -95,23 +92,23 @@ std::string ExpAST::GenerateIR(std::ostream &out, IRContext &context) const {
             out << "  " << result << " = eq " << value << ", 0\n";
             break;
         default:
-            throw std::logic_error("Unsupported unary operator");
+            return "";
     }
     return result;
 }
 
-void NumAST::Dump() const {std::cout << "NumAST {"<< num <<"}";}
-
-std::string NumAST::GenerateIR(std::ostream &, IRContext &) const {
-    return std::to_string(num);
-}
-
-void BinaryAST::Dump() const {
-    std::cout << "BinaryExpAST { " << op << ", ";
-    lhs->Dump();
-    std::cout << ", ";
-    rhs->Dump();
-    std::cout << " }";
+int ExpAST::Calculate(const IRContext &context) const {
+    const auto value = operand->Calculate(context);
+    switch (op) {
+        case '+':
+            return value;
+        case '-':
+            return static_cast<int>(-static_cast<std::int64_t>(value));
+        case '!':
+            return value == 0;
+        default:
+            return 0;
+    }
 }
 
 std::string BinaryAST::GenerateIR(std::ostream &out, IRContext &context) const {
@@ -154,11 +151,50 @@ std::string BinaryAST::GenerateIR(std::ostream &out, IRContext &context) const {
     } else if (op == "!=") {
         instruction = "ne";
     } else {
-        throw std::logic_error("Unsupported binary operator: " + op);
+        return "";
     }
 
     const auto result = context.NewTemp();
     out << "  " << result << " = " << instruction<< " " << left << ", " << right << '\n';
 
     return result;
+}
+
+int BinaryAST::Calculate(const IRContext &context) const {
+    const std::int64_t left = lhs->Calculate(context);
+
+    if (op == "&&") {
+        return left != 0 && rhs->Calculate(context) != 0;
+    }
+    if (op == "||") {
+        return left != 0 || rhs->Calculate(context) != 0;
+    }
+
+    const std::int64_t right = rhs->Calculate(context);
+
+    if (op == "+") {
+        return static_cast<int>(left + right);
+    }
+    if (op == "-") {
+        return static_cast<int>(left - right);
+    }
+    if (op == "*") {
+        return static_cast<int>(left * right);
+    }
+
+    if (op == "/") {
+        return static_cast<int>(left / right);
+    }
+    if (op == "%") {
+        return static_cast<int>(left % right);
+    }
+
+    if (op == "<")  return left < right;
+    if (op == ">")  return left > right;
+    if (op == "<=") return left <= right;
+    if (op == ">=") return left >= right;
+    if (op == "==") return left == right;
+    if (op == "!=") return left != right;
+
+    return 0;
 }
