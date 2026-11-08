@@ -53,14 +53,11 @@ using namespace std;
 %type <ast_list> BlockItems ConstDefList
 %type <int_val> UnaryOp MulOp AddOp 
 %type <str_val> EqOp RelOp
+%type <ast_val> VarDecl VarDef InitVal
+%type <ast_list> VarDefList
 
 %%
 
-// 开始符, CompUnit ::= FuncDef, 大括号后声明了解析完成后 parser 要做的事情
-// 之前我们定义了 FuncDef 会返回一个 str_val, 也就是字符串指针
-// 而 parser 一旦解析完 CompUnit, 就说明所有的 token 都被解析了, 即解析结束了
-// 此时我们应该把 FuncDef 返回的结果收集起来, 作为 AST 传给调用 parser 的函数
-// $1 指代规则里第一个符号的返回值, 也就是 FuncDef 的返回值
 CompUnit
   : FuncDef {
     auto comp_unit = make_unique<CompUnitAST>();
@@ -119,6 +116,12 @@ Stmt
     ast -> exp = unique_ptr<BaseAST>($2);
     $$ = ast;
   }
+  | LVal '=' Exp ';' {
+    auto node = new AssignStmtAST();
+    node->lval = unique_ptr<LValAST>(static_cast<LValAST*>($1));
+    node->exp = unique_ptr<BaseAST>($3);
+    $$ = node;
+  }  
   ;
 
 //常量和变量
@@ -126,8 +129,52 @@ Decl
   : ConstDecl {
     $$ = $1;
   }
-  : VarDecl{
-    
+  | VarDecl{
+    $$ = $1;
+  }
+  ;
+
+  VarDecl
+  : BType VarDefList ';' {
+    auto defs = unique_ptr<vector<unique_ptr<BaseAST>>>($2);
+    auto node = new VarDeclAST();
+    node->defs = std::move(*defs);
+    $$ = node;
+  }
+  ;
+
+VarDefList
+  : VarDef {
+    auto defs = new vector<unique_ptr<BaseAST>>();
+    defs->emplace_back($1);
+    $$ = defs;
+  }
+  | VarDefList ',' VarDef {
+    $1->emplace_back($3);
+    $$ = $1;
+  }
+  ;
+  
+VarDef
+  : IDENT {
+    auto ident = unique_ptr<string>($1);
+    auto node = new VarDefAST();
+    node->ident = *ident;
+    node->init_val = nullptr;
+    $$ = node;
+  }
+  | IDENT '=' InitVal {
+    auto ident = unique_ptr<string>($1);
+    auto node = new VarDefAST();
+    node->ident = *ident;
+    node->init_val = unique_ptr<BaseAST>($3);
+    $$ = node;
+  }
+  ;
+
+InitVal
+  : Exp {
+    $$ = $1;
   }
   ;
 

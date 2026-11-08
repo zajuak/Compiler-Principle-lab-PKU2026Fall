@@ -1,6 +1,7 @@
 #include "ast.h"
 
 #include <cstdint>
+#include <stdexcept>
 
 std::string IRContext::NewTemp() {
     return "%" + std::to_string(next_temp++);
@@ -46,8 +47,31 @@ std::string StmtAST::GenerateIR(std::ostream &out, IRContext &context) const {
     return "";
 }
 
-std::string ConstDeclAST::GenerateIR(std::ostream &out, IRContext &context) const {
+std::string VarDeclAST::GenerateIR(std::ostream &out, IRContext &context) const {
+    for (const auto &def : defs) {
+        def->GenerateIR(out, context);
+    }
+    return "";
+}
 
+std::string VarDefAST::GenerateIR(std::ostream &out, IRContext &context) const {
+    // 为变量的存储位置生成唯一的 IR 名称。
+    const auto address = context.NewTemp();
+    out << "  " << address << " = alloc i32\n";
+
+    // 将变量名与存储地址关联。
+    context.symbols.emplace(ident, Symbol{Symbol::Kind::Variable, 0, address});
+
+    // 有初始化表达式时，计算并写入。
+    if (init_val != nullptr) {
+        const auto value = init_val->GenerateIR(out, context);
+        out << "  store " << value << ", " << address << '\n';
+    }
+
+    return "";
+}
+
+std::string ConstDeclAST::GenerateIR(std::ostream &out, IRContext &context) const {
     for (const auto &def : defs) {
         def->GenerateIR(out, context);
     }
@@ -56,16 +80,33 @@ std::string ConstDeclAST::GenerateIR(std::ostream &out, IRContext &context) cons
 
 std::string ConstDefAST::GenerateIR(std::ostream &, IRContext &context) const {
     const auto value = init_val->Calculate(context);
-    context.constants.emplace(ident, value);
+    context.symbols.emplace(ident, Symbol{Symbol::Kind::Constant, value, ""});
     return "";
 }
 
-std::string LValAST::GenerateIR(std::ostream &, IRContext &context) const {
-    return std::to_string(Calculate(context));
+std::string LValAST::GenerateIR(std::ostream &out, IRContext &context) const {
+    const auto &symbol = context.symbols.at(ident);
+    if (symbol.kind == Symbol::Kind::Constant) {
+        return std::to_string(symbol.value);
+    }
+    const auto result = context.NewTemp();
+    out << "  " << result << " = load " << symbol.address << '\n';
+    return result;
 }
 int LValAST::Calculate(const IRContext &context) const {
-    const auto it = context.constants.find(ident);
-    return it->second;
+    const auto &it = context.symbols.at(ident);
+    return it.value;
+}
+std::string LValAST::GetAddress(const IRContext &context) const {
+    const auto &symbol = context.symbols.at(ident);
+    return symbol.address;
+}
+
+std::string AssignStmtAST::GenerateIR(std::ostream &out, IRContext &context) const {
+    const auto address = lval->GetAddress(context);
+    const auto value = exp->GenerateIR(out, context);
+    out << "  store " << value << ", " << address << '\n';
+    return "";
 }
 
 std::string NumAST::GenerateIR(std::ostream &, IRContext &) const {
@@ -77,7 +118,6 @@ int NumAST::Calculate(const IRContext &) const {
 }
 
 std::string ExpAST::GenerateIR(std::ostream &out, IRContext &context) const {
-    // 先生成子表达式，再使用其返回的立即数或临时值。
     const auto value = operand->GenerateIR(out, context);
     if (op == '+') {
         return value;

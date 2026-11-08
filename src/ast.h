@@ -7,10 +7,21 @@
 #include <vector>
 #include <unordered_map>
 
+struct Symbol {
+    enum class Kind {
+        Constant,
+        Variable
+    };
+
+    Kind kind;
+    int value = 0;          // 常量使用
+    std::string address;    // 变量使用
+};
+
 // 同一次 IR 生成共用临时值编号；每次 GenerateIR 都会创建新的上下文。
 struct IRContext {
     std::size_t next_temp = 0;
-    std::unordered_map<std::string, int> constants;
+    std::unordered_map<std::string, Symbol> symbols;
     std::string NewTemp();
 };
 
@@ -41,7 +52,6 @@ class FuncDefAST : public BaseAST {
     std::unique_ptr<BaseAST> func_type;
     std::string ident;
     std::unique_ptr<BaseAST> block;
-
     std::string GenerateIR(std::ostream &out, IRContext &context) const override;
 
 };
@@ -74,6 +84,21 @@ class StmtAST : public BaseAST{
 
 };
 
+class VarDeclAST : public BaseAST {
+public:
+    using BaseAST::GenerateIR;
+    std::vector<std::unique_ptr<BaseAST>> defs;
+    std::string GenerateIR(std::ostream &out, IRContext &context) const override;
+};
+
+class VarDefAST : public BaseAST {
+public:
+    using BaseAST::GenerateIR;
+    std::string ident;
+    std::unique_ptr<BaseAST> init_val;
+    std::string GenerateIR(std::ostream &out, IRContext &context) const override;
+};
+
 class ConstDeclAST : public BaseAST {
 public:
     using BaseAST::GenerateIR;
@@ -95,9 +120,17 @@ class LValAST : public BaseAST {
 public:
     using BaseAST::GenerateIR;
     std::string ident;
-
+    std::string GetAddress(const IRContext &context) const;
     std::string GenerateIR(std::ostream &out, IRContext &context) const override;
     int Calculate(const IRContext &context) const override;
+};
+
+class AssignStmtAST : public BaseAST {
+public:
+    using BaseAST::GenerateIR;
+    std::unique_ptr<LValAST> lval;
+    std::unique_ptr<BaseAST> exp;
+    std::string GenerateIR(std::ostream &out, IRContext &context) const override;
 };
 
 class NumAST : public BaseAST{
