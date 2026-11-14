@@ -21,9 +21,14 @@ struct Symbol {
 // 同一次 IR 生成共用临时值编号；每次 GenerateIR 都会创建新的上下文。
 struct IRContext {
     std::size_t next_temp = 0;
-    std::unordered_map<std::string, Symbol> symbols;
-    std::string NewTemp();
     bool terminated = false;
+    std::vector<std::unordered_map<std::string, Symbol>> scopes;
+
+    std::string NewTemp();
+    void EnterScope();
+    void ExitScope();
+    void Declare(const std::string &name, const Symbol &symbol);
+    const Symbol &Lookup(const std::string &name) const;
 };
 
 // 所有 AST 的基类
@@ -80,9 +85,16 @@ class StmtAST : public BaseAST{
     public :
     using BaseAST::GenerateIR;
     std::unique_ptr<BaseAST> exp;
-
     std::string GenerateIR(std::ostream &out, IRContext &context) const override;
 
+};
+
+class ExprStmtAST : public BaseAST {
+public:
+    using BaseAST::GenerateIR;
+    // 为空表示单独的分号。
+    std::unique_ptr<BaseAST> exp;
+    std::string GenerateIR(std::ostream &out, IRContext &context) const override;
 };
 
 class VarDeclAST : public BaseAST {

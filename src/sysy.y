@@ -122,6 +122,19 @@ Stmt
     node->exp = unique_ptr<BaseAST>($3);
     $$ = node;
   }  
+  | Exp ';'{
+    auto node = new ExprStmtAST();
+    node -> exp = unique_ptr<BaseAST> ($1);
+    $$ = node;
+  }
+  | Block{
+    $$ = $1;
+  }
+  | ';'{
+    auto node = new ExprStmtAST();
+    node -> exp = nullptr;
+    $$ = node ;
+  }
   ;
 
 //常量和变量

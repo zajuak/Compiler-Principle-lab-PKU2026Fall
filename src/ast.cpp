@@ -6,6 +6,27 @@
 std::string IRContext::NewTemp() {
     return "%" + std::to_string(next_temp++);
 }
+void IRContext::EnterScope() {
+    scopes.emplace_back();
+}
+void IRContext::ExitScope() {
+    scopes.pop_back();
+}
+void IRContext::Declare(const std::string &name, const Symbol &symbol) {
+    auto &current = scopes.back();
+    if (!current.emplace(name, symbol).second) {
+        throw std::runtime_error("Duplicate definition: " + name);
+    }
+}
+const Symbol &IRContext::Lookup(const std::string &name) const {
+    for (auto scope = scopes.rbegin(); scope != scopes.rend(); ++scope) {
+        const auto it = scope->find(name);
+        if (it != scope->end()) {
+            return it->second;
+        }
+    }
+    throw std::runtime_error("Undefined identifier: " + name);
+}
 
 void BaseAST::GenerateIR(std::ostream &out) const {
     IRContext context;
@@ -23,7 +44,7 @@ std::string FuncDefAST::GenerateIR(std::ostream &out, IRContext &context) const 
     context = IRContext{};
     const auto type = func_type->GenerateIR(out, context);
     out << "fun @" << ident << "(): " << type << " {\n";
-
+    out << "%entry:\n";    
     block->GenerateIR(out, context);
 
     out << "}\n";
@@ -35,11 +56,12 @@ std::string FuncTypeAST::GenerateIR(std::ostream &, IRContext &) const {
 }
 
 std::string BlockAST::GenerateIR(std::ostream &out, IRContext &context) const {
-    out << "%entry:\n";
+    context.EnterScope();
     for (const auto &item : items){
         if (context.terminated) break;
         item->GenerateIR(out, context);
     }
+    context.ExitScope();
     return "";
 }
 
@@ -47,6 +69,13 @@ std::string StmtAST::GenerateIR(std::ostream &out, IRContext &context) const {
     const auto value = exp->GenerateIR(out, context);
     out << "  ret " << value << "\n";
     context.terminated = true;
+    return "";
+}
+
+std::string ExprStmtAST::GenerateIR(std::ostream &out, IRContext &context) const {
+    if (exp != nullptr) {
+        exp->GenerateIR(out, context);
+    }
     return "";
 }
 
@@ -63,7 +92,7 @@ std::string VarDefAST::GenerateIR(std::ostream &out, IRContext &context) const {
     out << "  " << address << " = alloc i32\n";
 
     // 将变量名与存储地址关联。
-    context.symbols.emplace(ident, Symbol{Symbol::Kind::Variable, 0, address});
+    context.Declare(ident, Symbol{Symbol::Kind::Variable, 0, address});
 
     // 有初始化表达式时，计算并写入。
     if (init_val != nullptr) {
@@ -83,12 +112,12 @@ std::string ConstDeclAST::GenerateIR(std::ostream &out, IRContext &context) cons
 
 std::string ConstDefAST::GenerateIR(std::ostream &, IRContext &context) const {
     const auto value = init_val->Calculate(context);
-    context.symbols.emplace(ident, Symbol{Symbol::Kind::Constant, value, ""});
+    context.Declare(ident, Symbol{Symbol::Kind::Constant, value, ""});
     return "";
 }
 
 std::string LValAST::GenerateIR(std::ostream &out, IRContext &context) const {
-    const auto &symbol = context.symbols.at(ident);
+    const auto &symbol = context.Lookup(ident);
     if (symbol.kind == Symbol::Kind::Constant) {
         return std::to_string(symbol.value);
     }
@@ -97,11 +126,11 @@ std::string LValAST::GenerateIR(std::ostream &out, IRContext &context) const {
     return result;
 }
 int LValAST::Calculate(const IRContext &context) const {
-    const auto &it = context.symbols.at(ident);
+    const auto &it = context.Lookup(ident);
     return it.value;
 }
 std::string LValAST::GetAddress(const IRContext &context) const {
-    const auto &symbol = context.symbols.at(ident);
+    const auto &symbol = context.Lookup(ident);
     return symbol.address;
 }
 
@@ -115,7 +144,6 @@ std::string AssignStmtAST::GenerateIR(std::ostream &out, IRContext &context) con
 std::string NumAST::GenerateIR(std::ostream &, IRContext &) const {
     return std::to_string(num);
 }
-
 int NumAST::Calculate(const IRContext &) const {
     return num;
 }
@@ -202,7 +230,6 @@ std::string BinaryAST::GenerateIR(std::ostream &out, IRContext &context) const {
 
     return result;
 }
-
 int BinaryAST::Calculate(const IRContext &context) const {
     const std::int64_t left = lhs->Calculate(context);
 

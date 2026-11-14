@@ -32,7 +32,6 @@ void Visit(const koopa_raw_function_t &func, std::ostream &out, RiscvContext &co
 void Visit(const koopa_raw_basic_block_t &bb, std::ostream &out, RiscvContext &context);
 void Visit(const koopa_raw_value_t &value, std::ostream &out, RiscvContext &context);
 void Visit(const koopa_raw_return_t &ret, std::ostream &out, RiscvContext &context);
-void Visit(const koopa_raw_integer_t &integer, std::ostream &out, RiscvContext &context);
 void Visit(const koopa_raw_binary_t &binary, std::ostream &out, RiscvContext &context);
 void Visit(const koopa_raw_load_t &load, std::ostream &out, RiscvContext &context);
 void Visit(const koopa_raw_store_t &store, std::ostream &out, RiscvContext &context);
@@ -120,11 +119,6 @@ void Visit(const koopa_raw_return_t &ret, std::ostream &out, RiscvContext &conte
     }
     EmitStackAdjust(context.stack.GetSize(), out);
     out << "  ret\n";
-}
-
-// 访问整数常量。
-void Visit(const koopa_raw_integer_t &integer, std::ostream &out, RiscvContext &context) {
-    out << "  li a0, " << integer.value << '\n';
 }
 
 // 访问二元运算结果
