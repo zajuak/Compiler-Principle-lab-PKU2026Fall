@@ -23,12 +23,14 @@ struct IRContext {
     std::size_t next_temp = 0;
     bool terminated = false;
     std::vector<std::unordered_map<std::string, Symbol>> scopes;
+    std::size_t next_label = 0;
 
     std::string NewTemp();
     void EnterScope();
     void ExitScope();
     void Declare(const std::string &name, const Symbol &symbol);
     const Symbol &Lookup(const std::string &name) const;
+    std::string NewLabel(const std::string &prefix);
 };
 
 // 所有 AST 的基类
@@ -175,4 +177,14 @@ class BinaryAST : public BaseAST{
 
     std::string GenerateIR(std::ostream &out, IRContext &context) const override;
     int Calculate(const IRContext &context) const override;   
+};
+
+class IfStmtAST : public BaseAST {
+public:
+    using BaseAST::GenerateIR;
+    std::unique_ptr<BaseAST> condition;
+    std::unique_ptr<BaseAST> then_stmt;
+    std::unique_ptr<BaseAST> else_stmt;
+
+    std::string GenerateIR(std::ostream &out, IRContext &context) const override;
 };

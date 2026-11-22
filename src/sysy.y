@@ -44,6 +44,7 @@ using namespace std;
 %token <int_val> INT_CONST
 %token LE GE EQ NE LAND LOR
 %token CONST
+%token IF ELSE
 
 // 非终结符的类型定义
 %type <ast_val> FuncDef FuncType Block Stmt 
@@ -55,6 +56,7 @@ using namespace std;
 %type <str_val> EqOp RelOp
 %type <ast_val> VarDecl VarDef InitVal
 %type <ast_list> VarDefList
+%type <ast_val> MatchedStmt OpenStmt SimpleStmt
 
 %%
 
@@ -111,6 +113,45 @@ BlockItem
   ;
 
 Stmt
+  : MatchedStmt {
+    $$ = $1;
+  }
+  | OpenStmt {
+    $$ = $1;
+  }
+  ;
+
+MatchedStmt
+  : SimpleStmt {
+    $$ = $1;
+  }
+  | IF '(' Exp ')' MatchedStmt ELSE MatchedStmt {
+    auto node = new IfStmtAST();
+    node->condition = unique_ptr<BaseAST>($3);
+    node->then_stmt = unique_ptr<BaseAST>($5);
+    node->else_stmt = unique_ptr<BaseAST>($7);
+    $$ = node;
+  }
+  ;
+
+OpenStmt
+  : IF '(' Exp ')' Stmt {
+    auto node = new IfStmtAST();
+    node->condition = unique_ptr<BaseAST>($3);
+    node->then_stmt = unique_ptr<BaseAST>($5);
+    node->else_stmt = nullptr;
+    $$ = node;
+  }
+  | IF '(' Exp ')' MatchedStmt ELSE OpenStmt {
+    auto node = new IfStmtAST();
+    node->condition = unique_ptr<BaseAST>($3);
+    node->then_stmt = unique_ptr<BaseAST>($5);
+    node->else_stmt = unique_ptr<BaseAST>($7);
+    $$ = node;
+  }
+  ;
+
+SimpleStmt
   : RETURN Exp ';' {
     auto ast = new StmtAST();
     ast -> exp = unique_ptr<BaseAST>($2);

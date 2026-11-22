@@ -9,6 +9,7 @@ namespace {
 
 struct RiscvContext {
     StackFrame stack;
+    std::string function_name;
 };
 
 //读取操作数
@@ -25,6 +26,11 @@ void LoadValue(koopa_raw_value_t value, const std::string &reg, std::ostream &ou
     }
 }
 
+//生成汇编标签
+std::string BlockLabel(koopa_raw_basic_block_t bb, const RiscvContext &context) {
+    return ".L" + context.function_name + "_" + std::string(bb->name + 1);
+}
+
 // 提前声明所有重载，供下面的 Visit 函数相互调用。
 void Visit(const koopa_raw_program_t &program, std::ostream &out, RiscvContext &context);
 void Visit(const koopa_raw_slice_t &slice, std::ostream &out, RiscvContext &context);
@@ -35,6 +41,8 @@ void Visit(const koopa_raw_return_t &ret, std::ostream &out, RiscvContext &conte
 void Visit(const koopa_raw_binary_t &binary, std::ostream &out, RiscvContext &context);
 void Visit(const koopa_raw_load_t &load, std::ostream &out, RiscvContext &context);
 void Visit(const koopa_raw_store_t &store, std::ostream &out, RiscvContext &context);
+void Visit(const koopa_raw_branch_t &branch, std::ostream &out, RiscvContext &context);
+void Visit(const koopa_raw_jump_t &jump, std::ostream &out, RiscvContext &context);
 
 // 访问 raw program。
 void Visit(const koopa_raw_program_t &program, std::ostream &out, RiscvContext &context) {
@@ -73,6 +81,7 @@ void Visit(const koopa_raw_function_t &func, std::ostream &out, RiscvContext &co
     context = RiscvContext{};
     context.stack.Analyze(func);
     const char *name = func -> name +1;
+    context.function_name = name;
     
     out << "  .text \n";
     out << "  .globl " << name <<"\n";
@@ -83,6 +92,7 @@ void Visit(const koopa_raw_function_t &func, std::ostream &out, RiscvContext &co
 
 // 访问基本块。
 void Visit(const koopa_raw_basic_block_t &bb, std::ostream &out, RiscvContext &context) {
+    out << BlockLabel(bb, context) << ":\n";
     Visit(bb->insts, out, context);
 }
 
@@ -106,6 +116,12 @@ void Visit(const koopa_raw_value_t &value, std::ostream &out, RiscvContext &cont
         case KOOPA_RVT_BINARY:
             Visit(kind.data.binary, out, context);
             EmitStackStore("t0", context.stack.GetOffset(value), out);
+            break;
+        case KOOPA_RVT_BRANCH:
+            Visit(kind.data.branch, out, context);
+            break;
+        case KOOPA_RVT_JUMP:
+            Visit(kind.data.jump, out, context);
             break;
         default:
             break;
@@ -180,8 +196,7 @@ void Visit(const koopa_raw_binary_t &binary, std::ostream &out, RiscvContext &co
 
 void Visit(const koopa_raw_load_t &load, std::ostream &out, RiscvContext &context) {
     // 读取变量当前的值，暂存在 t0。
-    EmitStackLoad(
-        "t0", context.stack.GetOffset(load.src), out);
+    EmitStackLoad("t0", context.stack.GetOffset(load.src), out);
 }
 
 void Visit(const koopa_raw_store_t &store, std::ostream &out, RiscvContext &context) {
@@ -191,9 +206,19 @@ void Visit(const koopa_raw_store_t &store, std::ostream &out, RiscvContext &cont
     EmitStackStore("t0", context.stack.GetOffset(store.dest), out);
 }
 
+void Visit(const koopa_raw_branch_t &branch, std::ostream &out, RiscvContext &context) {
+    LoadValue(branch.cond, "t0", out, context);
+    out << "  bnez t0, " << BlockLabel(branch.true_bb, context) << '\n';
+    out << "  j " << BlockLabel(branch.false_bb, context) << '\n';
+}
+
+void Visit(const koopa_raw_jump_t &jump, std::ostream &out, RiscvContext &context) {
+    out << "  j "<< BlockLabel(jump.target, context) << '\n';
+}
 }  // namespace
 
 void GenerateRiscv(const koopa_raw_program_t &raw, std::ostream &out) {
     RiscvContext context;
     Visit(raw, out, context);
 }
+

@@ -27,6 +27,9 @@ const Symbol &IRContext::Lookup(const std::string &name) const {
     }
     throw std::runtime_error("Undefined identifier: " + name);
 }
+std::string IRContext::NewLabel(const std::string &prefix) {
+    return "%" + prefix + "_" + std::to_string(next_label++);
+}
 
 void BaseAST::GenerateIR(std::ostream &out) const {
     IRContext context;
@@ -183,20 +186,54 @@ int ExpAST::Calculate(const IRContext &context) const {
 }
 
 std::string BinaryAST::GenerateIR(std::ostream &out, IRContext &context) const {
-    const auto left = lhs ->GenerateIR(out,context);
-    const auto right = rhs ->GenerateIR(out,context);
-
     if (op == "&&" || op == "||") {
-        const auto left_bool = context.NewTemp();
-        out << "  " << left_bool << " = ne " << left << ", 0\n";
+        const bool is_and = (op == "&&");
+
+        // 为整个逻辑表达式的结果安排临时存储。
+        const auto result_address = context.NewTemp();
+        out << "  " << result_address << " = alloc i32\n";
+
+        // && 的默认结果为 0，|| 的默认结果为 1。
+        out << "  store " << (is_and ? 0 : 1) << ", " << result_address << '\n';
+
+        const auto left = lhs->GenerateIR(out, context);
+
+        const auto rhs_label = context.NewLabel("logic_rhs");
+        const auto end_label = context.NewLabel("logic_end");
+
+        if (is_and) {
+            // 左侧为真才需要计算右侧。
+            out << "  br " << left << ", " << rhs_label << ", " << end_label << '\n';
+        } else {
+            // 左侧为假才需要计算右侧。
+            out << "  br " << left << ", " << end_label << ", " << rhs_label << '\n';
+        }
+        context.terminated = true;
+
+        // 右侧表达式的指令放在这个基本块中。
+        out << '\n' << rhs_label << ":\n";
+        context.terminated = false;
+
+        const auto right = rhs->GenerateIR(out, context);
+
+        // 将右侧结果规范化为 0 或 1。
         const auto right_bool = context.NewTemp();
         out << "  " << right_bool << " = ne " << right << ", 0\n";
+        out << "  store " << right_bool << ", " << result_address << '\n';
+        out << "  jump " << end_label << '\n';
+        context.terminated = true;
+
+        // 两条路径在这里汇合，读取最终结果。
+        out << '\n' << end_label << ":\n";
+        context.terminated = false;
 
         const auto result = context.NewTemp();
-        const char *instruction = op == "&&" ? "and" : "or";
-        out << "  " << result << " = " << instruction << " " << left_bool << ", " << right_bool << '\n';
+        out << "  " << result << " = load " << result_address << '\n';
         return result;
     }
+
+    const auto left = lhs ->GenerateIR(out,context);
+    const auto right = rhs ->GenerateIR(out,context);
 
     const char *instruction;
     if (op == "+") {
@@ -267,4 +304,51 @@ int BinaryAST::Calculate(const IRContext &context) const {
     if (op == "!=") return left != right;
 
     return 0;
+}
+
+std::string IfStmtAST::GenerateIR(std::ostream &out, IRContext &context) const {
+    const auto cond = condition->GenerateIR(out, context);
+
+    const auto then_label = context.NewLabel("then");
+    const auto else_label = context.NewLabel("else");
+    const auto end_label = context.NewLabel("end");
+
+    // 没有 else 时，条件不成立就直接进入汇合块。
+    out << "  br " << cond << ", " << then_label << ", " << (else_stmt ? else_label : end_label)<< '\n';
+    context.terminated = true;
+
+    // 没有 else 时，假分支一定需要汇合块。
+    bool need_end = (else_stmt == nullptr);
+
+    // 生成成立分支。
+    out << '\n' << then_label << ":\n";
+    context.terminated = false;
+    then_stmt->GenerateIR(out, context);
+
+    if (!context.terminated) {
+        out << "  jump " << end_label << '\n';
+        context.terminated = true;
+        need_end = true;
+    }
+
+    // 生成不成立分支。
+    if (else_stmt != nullptr) {
+        out << '\n' << else_label << ":\n";
+        context.terminated = false;
+        else_stmt->GenerateIR(out, context);
+
+        if (!context.terminated) {
+            out << "  jump " << end_label << '\n';
+            context.terminated = true;
+            need_end = true;
+        }
+    }
+
+    // 仅在确实存在后续路径时生成汇合块。
+    if (need_end) {
+        out << '\n' << end_label << ":\n";
+        context.terminated = false;
+    }
+
+    return "";
 }
