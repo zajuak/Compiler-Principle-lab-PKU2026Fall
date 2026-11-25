@@ -45,6 +45,7 @@ using namespace std;
 %token LE GE EQ NE LAND LOR
 %token CONST
 %token IF ELSE
+%token WHILE CONTINUE BREAK
 
 // 非终结符的类型定义
 %type <ast_val> FuncDef FuncType Block Stmt 
@@ -132,6 +133,13 @@ MatchedStmt
     node->else_stmt = unique_ptr<BaseAST>($7);
     $$ = node;
   }
+  | WHILE '(' Exp ')' MatchedStmt{
+    auto node = new WhileStmtAST();
+    node->condition = unique_ptr<BaseAST>($3);
+    node->body = unique_ptr<BaseAST>($5);
+    $$ = node;
+ }
+  
   ;
 
 OpenStmt
@@ -148,6 +156,12 @@ OpenStmt
     node->then_stmt = unique_ptr<BaseAST>($5);
     node->else_stmt = unique_ptr<BaseAST>($7);
     $$ = node;
+  }
+  | WHILE '(' Exp ')' OpenStmt{
+    auto node = new WhileStmtAST();
+    node->condition = unique_ptr<BaseAST>($3);
+    node->body = unique_ptr<BaseAST>($5);
+    $$ = node;    
   }
   ;
 
@@ -175,6 +189,12 @@ SimpleStmt
     auto node = new ExprStmtAST();
     node -> exp = nullptr;
     $$ = node ;
+  }
+  | BREAK ';' {
+      $$ = new BreakStmtAST();
+  }
+  | CONTINUE ';' {
+      $$ = new ContinueStmtAST();
   }
   ;
 

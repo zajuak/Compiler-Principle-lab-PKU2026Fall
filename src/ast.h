@@ -18,13 +18,19 @@ struct Symbol {
     std::string address;    // 变量使用
 };
 
+struct LoopTargets {
+    std::string continue_target;
+    std::string break_target;
+};
+
 // 同一次 IR 生成共用临时值编号；每次 GenerateIR 都会创建新的上下文。
 struct IRContext {
     std::size_t next_temp = 0;
     bool terminated = false;
     std::vector<std::unordered_map<std::string, Symbol>> scopes;
     std::size_t next_label = 0;
-
+    std::vector<LoopTargets> loops;
+    
     std::string NewTemp();
     void EnterScope();
     void ExitScope();
@@ -185,6 +191,29 @@ public:
     std::unique_ptr<BaseAST> condition;
     std::unique_ptr<BaseAST> then_stmt;
     std::unique_ptr<BaseAST> else_stmt;
+
+    std::string GenerateIR(std::ostream &out, IRContext &context) const override;
+};
+
+class WhileStmtAST : public BaseAST {
+public:
+    using BaseAST::GenerateIR;
+    std::unique_ptr<BaseAST> condition;
+    std::unique_ptr<BaseAST> body;
+
+    std::string GenerateIR(std::ostream &out, IRContext &context) const override;
+};
+
+class BreakStmtAST : public BaseAST {
+public:
+    using BaseAST::GenerateIR;
+
+    std::string GenerateIR(std::ostream &out, IRContext &context) const override;
+};
+
+class ContinueStmtAST : public BaseAST {
+public:
+    using BaseAST::GenerateIR;
 
     std::string GenerateIR(std::ostream &out, IRContext &context) const override;
 };

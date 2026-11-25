@@ -49,7 +49,10 @@ std::string FuncDefAST::GenerateIR(std::ostream &out, IRContext &context) const 
     out << "fun @" << ident << "(): " << type << " {\n";
     out << "%entry:\n";    
     block->GenerateIR(out, context);
-
+    if (!context.terminated) {
+        out << "  ret 0\n";
+        context.terminated = true;
+    }
     out << "}\n";
     return "";
 }
@@ -350,5 +353,61 @@ std::string IfStmtAST::GenerateIR(std::ostream &out, IRContext &context) const {
         context.terminated = false;
     }
 
+    return "";
+}
+
+std::string WhileStmtAST::GenerateIR(std::ostream &out, IRContext &context) const {
+    const auto condition_label = context.NewLabel("while_cond");
+    const auto body_label = context.NewLabel("while_body");
+    const auto end_label = context.NewLabel("while_end");
+
+    // 从当前块进入条件块。
+    out << "  jump " << condition_label << '\n';
+    context.terminated = true;
+
+    // 每轮都从这里重新计算条件。
+    out << '\n' << condition_label << ":\n";
+    context.terminated = false;
+
+    const auto cond = condition->GenerateIR(out, context);
+    out << "  br " << cond << ", " << body_label << ", " << end_label << '\n';
+    context.terminated = true;
+
+    // 生成循环体，记录当前循环的跳转目标。
+    out << '\n' << body_label << ":\n";
+    context.terminated = false;
+
+    context.loops.push_back({condition_label, end_label});
+    body->GenerateIR(out, context);
+    context.loops.pop_back();
+
+    // 正常执行完循环体，回到条件块。
+    if (!context.terminated) {
+        out << "  jump " << condition_label << '\n';
+        context.terminated = true;
+    }
+
+    // 循环结束后继续执行。
+    out << '\n' << end_label << ":\n";
+    context.terminated = false;
+
+    return "";
+}
+
+std::string BreakStmtAST::GenerateIR(std::ostream &out, IRContext &context) const {
+    if (context.loops.empty()) {
+        throw std::runtime_error("break outside loop");
+    }
+    out << "  jump " << context.loops.back().break_target << '\n';
+    context.terminated = true;
+    return "";
+}
+
+std::string ContinueStmtAST::GenerateIR(std::ostream &out, IRContext &context) const {
+    if (context.loops.empty()) {
+        throw std::runtime_error("continue outside loop");
+    }
+    out << "  jump " << context.loops.back().continue_target << '\n';
+    context.terminated = true;
     return "";
 }
